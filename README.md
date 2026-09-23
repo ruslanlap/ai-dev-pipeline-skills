@@ -51,7 +51,7 @@ The workflow follows [GitHub's keyless Copilot CLI guidance](https://docs.github
 
 ## Earlier skills
 
-The original five Claude Code skills remain under `skills/triage/`, `skills/feature-spec/`, `skills/bug-agent/`, `skills/implement/`, and `skills/pr-review/`. They describe a specific demo project (`vidprog/coffee-ground-tests`) and need adaptation before use elsewhere. Use the shared [`ai-dev-pipeline`](skills/ai-dev-pipeline/SKILL.md) skill for new work in any supported agent.
+The original five Claude Code skills remain under `skills/triage/`, `skills/feature-spec/`, `skills/bug-agent/`, `skills/implement/`, and `skills/pr-review/`. They are demo-specific and need adaptation before use elsewhere. Use the shared [`ai-dev-pipeline`](skills/ai-dev-pipeline/SKILL.md) skill for new work in any supported agent.
 
 ## Validate
 

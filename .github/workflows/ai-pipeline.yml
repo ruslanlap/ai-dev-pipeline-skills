@@ -1,0 +1,93 @@
+name: AI development pipeline
+
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ai-pipeline-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  codex:
+    if: >-
+      (github.event_name == 'issues' &&
+        (github.event.label.name == 'ai:triage' || github.event.label.name == 'ai:spec')) ||
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      copilot-requests: write
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check pull request commits
+        if: github.event_name == 'pull_request'
+        run: git cat-file -e '${{ github.event.pull_request.head.sha }}^{commit}'
+
+      - name: Provide event context
+        run: cp "$GITHUB_EVENT_PATH" .ai-event.json
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Run Codex model
+        id: run_codex
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          copilot --model gpt-5.3-codex \
+            -p "$(cat .github/codex/automation.md)" -s \
+            --disable-builtin-mcps \
+            --available-tools='bash,view,grep,glob' \
+            --allow-tool='shell(git diff:*),shell(git show:*)' \
+            --deny-tool='write,url' > "$RUNNER_TEMP/ai-feedback.md"
+          delimiter="EOF_$(openssl rand -hex 16)"
+          printf 'final-message<<%s\n' "$delimiter" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/ai-feedback.md" >> "$GITHUB_OUTPUT"
+          printf '\n%s\n' "$delimiter" >> "$GITHUB_OUTPUT"
+
+  post_feedback:
+    needs: codex
+    if: needs.codex.outputs.final_message != ''
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Create or update feedback
+        uses: actions/github-script@v7
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.codex.outputs.final_message }}
+        with:
+          script: |
+            const number = context.payload.pull_request?.number ?? context.payload.issue.number;
+            const stage = context.eventName === 'pull_request'
+              ? 'review'
+              : context.payload.label.name === 'ai:spec' ? 'spec' : 'triage';
+            const marker = `<!-- ai-dev-pipeline:${stage} -->`;
+            const body = `${marker}\n${process.env.CODEX_FINAL_MESSAGE}`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: number, per_page: 100,
+            });
+            const previous = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.startsWith(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: previous.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: number, body,
+              });
+            }

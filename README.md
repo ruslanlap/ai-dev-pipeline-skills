@@ -1,77 +1,67 @@
-# AI Dev Pipeline Skills
+# AI Dev Pipeline
 
-A set of five agent skills that run an autonomous, evidence-first development
-pipeline on GitHub Issues and Pull Requests. Works with any coding agent that
-supports SKILL.md files — Claude Code, Codex, Gemini CLI, OpenCode, Cursor,
-Hermes Agent and more.
+A portable [Agent Skill](https://agentskills.io/specification) for moving a software issue or pull request to a reviewable result. The same `SKILL.md` and references support issue triage, feature specification, bug fixes, feature implementation, and PR review in agents that implement the standard. The skill follows the target repository's stack, tests, and conventions.
 
-## The problem they solve
+## Use in this repository
 
-AI agents that "fix" tickets without reproducing them, claim success without proof,
-over-deliver beyond the spec, and merge their own work. These skills enforce the
-opposite: every step produces verifiable evidence, and **a human always merges**.
+The canonical skill is [`skills/ai-dev-pipeline/`](skills/ai-dev-pipeline/SKILL.md). Project links expose that one copy in the discovery paths below:
 
-## Pipeline
+| Agent | Project skill path |
+| --- | --- |
+| [Codex](https://learn.chatgpt.com/docs/build-skills), [Gemini CLI](https://geminicli.com/docs/cli/using-agent-skills/), [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills), [Cursor](https://prod.cursor.com/docs/skills), [OpenCode](https://opencode.ai/docs/skills) | `.agents/skills/ai-dev-pipeline/` |
+| [Claude Code](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) | `.claude/skills/ai-dev-pipeline/` |
 
-```
-Issue → triage → feature-spec → (human approves: spec:approved) → implement → PR
-     ↘ triage → bug-agent (reproduce → failing test → fix → prove) → PR
-                                                PR → pr-review → (human merges)
-```
+These paths are symbolic links to the canonical folder, so edits stay in one place. If your checkout does not support symbolic links, copy the whole canonical folder into your agent's documented project skills directory.
 
-| Skill | Job | Trigger |
-|---|---|---|
-| [`triage`](skills/triage/SKILL.md) | Classify the ticket, fill information gaps with proposals (not questions), find duplicates, label | ticket without `ai:triaged` |
-| [`feature-spec`](skills/feature-spec/SKILL.md) | Research the code, write a spec with acceptance criteria and an honest browser-overlay mockup, ask for human review | `type:feature` + `ai:triaged` |
-| [`implement`](skills/implement/SKILL.md) | Implement an approved spec, tests first, screenshots included, open a draft PR | `spec:approved` (set by a human) |
-| [`bug-agent`](skills/bug-agent/SKILL.md) | Reproduce in a real browser, pin with a failing test, fix only when confidence is high, prove with before/after screenshots | `type:bug` + `ai:triaged` |
-| [`pr-review`](skills/pr-review/SKILL.md) | Check spec compliance, evidence, regressions, conventions; review comment + `ai:reviewed` label | PR opened or updated |
-| [`_shared/`](skills/_shared/) | Evidence rules and GitHub workflow reference shared by all skills | — |
-
-## Core rules enforced across the pipeline
-
-- **No fix without reproduction.** A failing test that turns green is the only proof of a fix.
-- **Evidence is public.** "Before" screenshots land in the ticket *before* any fix;
-  "after" screenshots after. Actions artifacts don't count — raw branch links only.
-- **Proposals over questions.** Triage fills gaps with one concrete, code-grounded option
-  a human can approve silently — questions only where different answers mean different products.
-- **Humans gate everything.** `spec:approved` is set by a human; merges are done by a human;
-  agents never approve their own PRs.
-- **Idempotency and loop protection.** No duplicate comments, no agent-triggering-agent loops,
-  `ai:in-progress` is always cleaned up.
-
-## Install
-
-Pick your agent's skills directory and copy the folders there:
-
-| Agent | Destination |
-|---|---|
-| Claude Code | `.claude/skills/` |
-| Codex | `.codex/skills/` |
-| Gemini CLI | `.gemini/skills/` |
-| Cursor | `.cursor/skills/` |
-| Hermes Agent | `hermes skills install <raw-SKILL.md-URL> --name <skill> --yes` |
+For use across your own projects, copy the skill to a personal skills directory. Codex, Gemini CLI, Copilot, Cursor, and OpenCode support `~/.agents/skills/`; Claude Code uses `~/.claude/skills/`:
 
 ```bash
-cp -r skills/* /path/to/your-repo/.claude/skills/    # or your agent's dir from the table
+mkdir -p ~/.agents/skills
+cp -R skills/ai-dev-pipeline ~/.agents/skills/
+# For Claude Code instead:
+mkdir -p ~/.claude/skills
+cp -R skills/ai-dev-pipeline ~/.claude/skills/
 ```
 
-Single-skill install for Hermes Agent:
+In Codex, invoke it with `$ai-dev-pipeline`; in Claude Code, use `/ai-dev-pipeline`. Agents can also select it when a request matches its description. For other agents, use their normal skill picker or ask to apply `ai-dev-pipeline`.
+
+## What it does
+
+| Stage | Result |
+| --- | --- |
+| Triage | Classification, code-grounded gaps and proposals, next action |
+| Feature spec | Observable acceptance criteria and scoped implementation plan |
+| Bug fix | Reproduction, regression check, root-cause change, verification |
+| Feature implementation | Change against approved scope with relevant checks |
+| PR review | Prioritized findings tied to files and behavior |
+
+The skill selects only the requested stage. It follows the target repository's `AGENTS.md`, test commands, and approval gates. Screenshots are used for visual claims when useful; tests and repeatable observations support behavior claims. It does not assume Node, Playwright, a branch name, or permission to merge.
+
+## GitHub Actions automation
+
+The [workflow](.github/workflows/ai-pipeline.yml) runs the `gpt-5.3-codex` model through GitHub Copilot CLI for three events; the skill itself is agent-independent:
+
+- Add `ai:triage` to an issue for code-grounded triage.
+- Add `ai:spec` to an issue for a feature specification.
+- Open or update a non-draft PR from a branch in the same repository for review feedback.
+
+Create the two labels and ensure the repository owner has GitHub Copilot access. No API key or repository secret is needed: Actions supplies `GITHUB_TOKEN` with `copilot-requests: write`. Usage counts against the owner's Copilot entitlement; organizations must enable the Copilot CLI billing policy. The AI job has read-only repository permissions and no GitHub write permission; a separate job creates or updates one bot comment per stage. PR review uses the base commit's instructions and inspects the proposed commit through Git, without running PR code. The workflow does not implement code, approve specs, or merge PRs. To use it in another repository, copy `.github/workflows/ai-pipeline.yml`, `.github/codex/automation.md`, `skills/ai-dev-pipeline/`, and the discovery links under `.agents/skills/` and `.claude/skills/`.
+
+The workflow follows [GitHub's keyless Copilot CLI guidance](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli-in-actions). The model is Codex, but the Actions billing and authentication are provided by GitHub Copilot.
+
+## Earlier skills
+
+The original five Claude Code skills remain under `skills/triage/`, `skills/feature-spec/`, `skills/bug-agent/`, `skills/implement/`, and `skills/pr-review/`. They describe a specific demo project (`vidprog/coffee-ground-tests`) and need adaptation before use elsewhere. Use the shared [`ai-dev-pipeline`](skills/ai-dev-pipeline/SKILL.md) skill for new work in any supported agent.
+
+## Validate
 
 ```bash
-hermes skills install https://raw.githubusercontent.com/ruslanlap/ai-dev-pipeline-skills/main/skills/triage/SKILL.md --name triage --yes
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" skills/ai-dev-pipeline
+git diff --check
+node --test tests/workflow.test.mjs
 ```
 
-### Adapting to your repo
-
-The skills are written against a vanilla JS + Playwright demo project
-(`scripts/evidence.mjs`, no build step).
-Search-and-replace the repo slug and adapt the project-specific checks
-(`TESTS` structure, 360px, `AGENTS.md` conventions) to your codebase.
-
-The label vocabulary the pipeline expects: `ai:triaged`, `ai:in-progress`, `ai:reviewed`,
-`type:bug`, `type:feature`, `spec:ready`, `spec:approved`, `needs-info`, `needs-human`,
-`bug:reproduced`, `bug:not-reproducible`.
+The first command uses the local Codex skill-creator validator; its path may differ on another machine. The Node test checks that feedback is updated on rerun instead of duplicated. This repository has no application build.
 
 ## License
 
